@@ -10,6 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 import base64
 import json
+from urllib.parse import urlparse
 
 
 def sanitize_filename(filename):
@@ -21,6 +22,122 @@ def sanitize_filename(filename):
     if len(filename) > 200:
         filename = filename[:200]
     return filename
+
+
+def get_domain_type(url):
+    """
+    识别网站类型
+    :param url: 网页URL
+    :return: 网站类型字符串
+    """
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+
+        if 'mdpi.com' in domain:
+            return 'mdpi'
+        elif 'globalbiodefense.com' in domain:
+            return 'globalbiodefense'
+        elif 'imec' in domain:  # imec.be 或 imec-int.com
+            return 'imec'
+        elif 'plos.org' in domain:
+            return 'plos'
+        else:
+            return 'other'
+    except:
+        return 'other'
+
+
+def get_content_cleanup_script(domain_type):
+    """
+    根据网站类型生成内容清理脚本
+    :param domain_type: 网站类型
+    :return: JavaScript清理脚本
+    """
+    scripts = {
+        'mdpi': """
+            // MDPI: 只保留 middle-column 内容
+            var mainContent = document.querySelector('#middle-column');
+            if (mainContent) {
+                // 移除 middle-column__help 导航栏
+                var helpSection = mainContent.querySelector('.middle-column__help');
+                if (helpSection) {
+                    helpSection.remove();
+                }
+
+                // 保存主内容
+                var contentHTML = mainContent.innerHTML;
+
+                // 清空body并只添加主内容
+                document.body.innerHTML = '<div id="middle-column" class="content__column">' + contentHTML + '</div>';
+
+                // 添加基本样式
+                var style = document.createElement('style');
+                style.textContent = 'body { padding: 20px; font-family: Arial, sans-serif; } #middle-column { max-width: 900px; margin: 0 auto; }';
+                document.head.appendChild(style);
+            }
+        """,
+
+        'globalbiodefense': """
+            // Global Biodefense: 只保留 main-content
+            var mainContent = document.querySelector('.col-8.main-content.s-post-contain');
+            if (mainContent) {
+                var contentHTML = mainContent.innerHTML;
+                document.body.innerHTML = '<div class="main-content">' + contentHTML + '</div>';
+
+                var style = document.createElement('style');
+                style.textContent = 'body { padding: 20px; font-family: Arial, sans-serif; } .main-content { max-width: 900px; margin: 0 auto; }';
+                document.head.appendChild(style);
+            }
+        """,
+
+        'imec': """
+            // IMEC: 只保留 layout-content
+            var mainContent = document.querySelector('.layout_layout-content___o3j2');
+            if (mainContent) {
+                var contentHTML = mainContent.innerHTML;
+                document.body.innerHTML = '<div class="layout-content">' + contentHTML + '</div>';
+
+                var style = document.createElement('style');
+                style.textContent = 'body { padding: 20px; font-family: Arial, sans-serif; } .layout-content { max-width: 1200px; margin: 0 auto; }';
+                document.head.appendChild(style);
+            }
+        """,
+
+        'plos': """
+            // PLOS: 只保留 main-content
+            var mainContent = document.querySelector('#main-content');
+            if (mainContent) {
+                var contentHTML = mainContent.innerHTML;
+                document.body.innerHTML = '<main id="main-content">' + contentHTML + '</main>';
+
+                var style = document.createElement('style');
+                style.textContent = 'body { padding: 20px; font-family: Arial, sans-serif; } #main-content { max-width: 900px; margin: 0 auto; }';
+                document.head.appendChild(style);
+            }
+        """,
+
+        'other': """
+            // 其他网站：移除常见的导航栏、侧边栏、页脚等
+            var elementsToRemove = [
+                'header', 'nav', 'aside', 'footer',
+                '.header', '.navigation', '.sidebar', '.footer',
+                '.advertisement', '.ad', '.banner'
+            ];
+
+            elementsToRemove.forEach(function(selector) {
+                var elements = document.querySelectorAll(selector);
+                elements.forEach(function(el) {
+                    // 只移除明显的导航和广告元素，保留文章内的这些标签
+                    if (el.offsetHeight < 200 || selector.includes('ad') || selector.includes('banner')) {
+                        el.remove();
+                    }
+                });
+            });
+        """
+    }
+
+    return scripts.get(domain_type, scripts['other'])
 
 
 def setup_driver(download_dir, proxy_settings=None):
@@ -96,6 +213,21 @@ def save_page_as_pdf(driver, url, output_path, wait_time=5, max_retries=2):
             # 额外等待图片和其他资源加载
             driver.execute_script("return document.readyState") == "complete"
             time.sleep(3)  # 增加等待时间确保国外网站加载完成
+
+            # 清理页面内容 - 只保留正文
+            domain_type = get_domain_type(url)
+            cleanup_script = get_content_cleanup_script(domain_type)
+
+            if domain_type != 'other':
+                print(f"  检测到网站类型: {domain_type}，正在清理内容...")
+
+            try:
+                driver.execute_script(cleanup_script)
+                time.sleep(1)  # 等待DOM更新
+                print(f"  内容清理完成")
+            except Exception as e:
+                print(f"  内容清理警告: {str(e)}")
+                # 继续执行，即使清理失败
 
             # 使用Chrome的打印功能生成PDF
             print_options = {
