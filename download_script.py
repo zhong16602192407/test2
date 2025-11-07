@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import time
 import json
 from datetime import datetime
+import random
 
 
 def extract_urls(text):
@@ -52,19 +53,32 @@ def download_pdf(url, filename, output_dir='downloads', max_retries=3):
             print(f"⊙ 文件已存在，跳过: {filename} ({file_size} bytes)")
             return True, None
 
-    # 准备多个User-Agent，增加成功率
+    # 准备多个User-Agent，把成功率高的放前面
     user_agents = [
+        # Firefox系列（测试发现这个最好用）
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0',
+        # Edge系列
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+        # Safari系列
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+        # Chrome系列
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
     ]
 
     # 重试循环
     for attempt in range(max_retries):
         try:
-            # 每次重试使用不同的User-Agent
+            # 第一次尝试用最好的User-Agent，之后随机选择避免被识别
+            if attempt == 0:
+                selected_ua = user_agents[0]  # 第一次用最好的（Firefox）
+            else:
+                selected_ua = random.choice(user_agents)  # 重试时随机选择
+
             headers = {
-                'User-Agent': user_agents[attempt % len(user_agents)],
+                'User-Agent': selected_ua,
                 'Accept': 'application/pdf,application/octet-stream,*/*',
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
                 'Referer': url,
